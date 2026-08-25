@@ -1,29 +1,88 @@
-import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import express from 'express';
+import cors from 'cors';
+import http from 'http';
+import { Server } from 'socket.io';
+import { createRequire } from 'node:module';
+import { PassThrough } from 'node:stream';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = process.env.PORT || 8080;
-const TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-};
+const require = createRequire(import.meta.url);
+const ytdlp = require('youtube-dl-exec').create(path.resolve('yt-dlp'));
 
-const server = http.createServer(async (req, res) => {
-  try {
-    let p = decodeURIComponent(req.url.split('?')[0]);
-    if (p === '/') p = '/index.html';
-    const file = path.join(__dirname, p);
-    if (!file.startsWith(__dirname)) { res.writeHead(403); return res.end('no'); }
-    const buf = await readFile(file);
-    res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
-    res.end(buf);
-  } catch {
-    res.writeHead(404); res.end('no encontrado');
-  }
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
+app.use(cors({ origin: "*" }));
+app.use(express.json());
+app.use(express.static('public'));
+
+const COOKIES = path.resolve('cookies.txt');
+const PORT = process.env.PORT || 10000;
+
+let djConnected = false, currentDJSocket = null, autoDJProcess = null;
+let listeners = [], radioQueue = [], lastPlayed = null;
+const broadcast = new PassThrough();
+
+app.get('/radio/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'audio/mpeg',
+    'Transfer-Encoding': 'chunked',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  listeners.push(res);
+  req.on('close', () => {
+    listeners = listeners.filter(l => l !== res);
+  });
 });
-server.listen(PORT, () => console.log(`NEON WEB en http://localhost:${PORT}`));
+
+function startAutoDJ() {
+  if (djConnected || autoDJProcess) return;
+  autoDJProcess = ytdlp.exec(['--cookies', COOKIES, '-f', 'bestaudio', '-o', '-', 'ytsearch:lofi music radio en vivo'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  
+  autoDJProcess.child.stdout.on('data', c => {
+    if (djConnected) { stopAutoDJ(); return; }
+    listeners.forEach(r => { try { r.write(c); } catch {} });
+  });
+  
+  autoDJProcess.child.on('close', () => {
+    autoDJProcess = null;
+    if (!djConnected) startAutoDJ();
+  });
+  
+  autoDJProcess.catch(() => { autoDJProcess = null; });
+}
+
+function stopAutoDJ() {
+  if (autoDJProcess) {
+    try { autoDJProcess.child.kill(); } catch {}
+    autoDJProcess = null;
+  }
+}
+
+io.on('connection', socket => {
+  socket.on('registrar-dj', () => {
+    djConnected = true; 
+    currentDJSocket = socket.id;
+    stopAutoDJ();
+  });
+  
+  socket.on('stream-desde-dj', c => {
+    if (socket.id === currentDJSocket) {
+      listeners.forEach(r => { try { r.write(Buffer.from(c)); } catch {} });
+    }
+  });
+  
+  socket.on('disconnect', () => {
+    if (socket.id === currentDJSocket) {
+      djConnected = false; 
+      currentDJSocket = null;
+      startAutoDJ();
+    }
+  });
+});
+
+startAutoDJ();
+server.listen(PORT, () => console.log('Radio corriendo en puerto ' + PORT));
+
