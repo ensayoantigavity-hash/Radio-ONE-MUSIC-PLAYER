@@ -16,6 +16,9 @@ body {
 
 /* Buscador */
 .search-box { position: relative; margin-bottom: 14px; display: flex; align-items: center; }
+.key-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: 0; cursor: pointer; color: #999; font-size: 16px; line-height: 1; padding: 4px; }
+.key-btn:hover { color: #111; }
+.modal.hidden { display: none; }
 .search-box input {
   flex: 1; width: 100%; padding: 12px 40px 12px 40px; border: 1px solid #e0e0e0; border-radius: 10px;
   font-size: 14px; outline: none; background-color: #fafafa; transition: all 0.2s ease;

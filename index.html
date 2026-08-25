@@ -14,7 +14,8 @@
       <span class="s-ic" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
       </span>
-      <input type="text" id="searchInput" placeholder="Estilo (pop, rock, 80s, 90s, latin, lofi) o link de playlist…" />
+      <input type="text" id="searchInput" placeholder="Canción o estilo (pop, rock, 80s, 90s, latin, lofi)…" />
+      <button class="key-btn" id="keyBtn" title="API key (búsqueda por nombre de canción)">⚙</button>
     </div>
     <button id="autoDjBtn" class="autodj-btn" title="Radio automática (pop / clásicos 80-90)">🤖 Auto-DJ</button>
 
@@ -63,6 +64,14 @@
       <div class="start-logo">ONE <span>MUSIC</span></div>
       <p>Radio infinita desde YouTube.<br/>Toca para iniciar.</p>
       <button class="start-btn" id="startBtn">▶ Iniciar radio</button>
+    </div>
+  </div>
+  <div class="modal hidden" id="keyModal">
+    <div class="modal-card">
+      <h3>API key de YouTube</h3>
+      <p>Para buscar por <b>nombre de canción</b> se necesita una API key gratuita de Google (sin servidor). Pégala aquí; se guarda solo en este navegador. Sin key, busca por estilo o pega un link de playlist.</p>
+      <input type="text" id="keyInput" placeholder="AIza..." />
+      <div class="modal-actions"><button class="ghost" id="keyCancel">Cancelar</button><button class="primary" id="keySave">Guardar</button></div>
     </div>
   </div>
   <div id="toast" class="toast"></div>

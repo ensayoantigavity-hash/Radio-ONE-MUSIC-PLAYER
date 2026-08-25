@@ -20,11 +20,16 @@
   const volumeFill = $('#volumeFill');
   const toastEl = $('#toast');
   const overlay = $('#startOverlay');
+  const keyBtn = $('#keyBtn');
+  const keyModal = $('#keyModal');
+  const keyInput = $('#keyInput');
+  const keySave = $('#keySave');
+  const keyCancel = $('#keyCancel');
 
   const PLAY_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M8 5v14l11-7z"/></svg>';
   const PAUSE_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
   const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const showToast = (m) => { toastEl.textContent = m; toastEl.classList.add('show'); clearTimeout(showToast._t); showToast._t = setTimeout(() => toastEl.classList.remove('show'), 3200); };
+  const showToast = (m) => { toastEl.textContent = m; toastEl.classList.add('show'); clearTimeout(showToast._t); showToast._t = setTimeout(() => toastEl.classList.remove('show'), 3400); };
   const normPlain = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
   const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), r = s % 60; return m + ':' + String(r).padStart(2, '0'); };
   const shuffle = (a) => { const r = a.slice(); for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; } return r; };
@@ -32,7 +37,7 @@
 
   const REGIONAL_RE = /(ranchera|rancheras|ranchero|rancheros|norte[nñ]a|norteno|norteño|banda|corrido|corridos|mariachi|mariachis|grupero|grupera|gruperos|regional mexican|música popular|musica popular|música típica|musica tipica|tambora|pisteado|duranguense|pasito duranguense)/i;
 
-  // ---- Catálogo de PLAYLISTS PÚBLICAS de YouTube (sin API key, sin servidor) ----
+  // ---- Catálogo de PLAYLISTS PÚBLICAS (modo sin key) ----
   const CATALOG = [
     { id: 'PL6R5uqk1vks-CB4PBzMA8RqxjrGz3ZRZK', name: 'Pop Hits 2024', tags: ['pop', 'hits', '2024', 'moderno', 'actual', 'top'] },
     { id: 'PLpmhym1EiQzcv0AIZcxuXwWfdKoHTxCDo', name: 'TOP 100 Songs 2024 (Billboard)', tags: ['pop', 'hits', '2024', 'top', 'billboard'] },
@@ -47,14 +52,72 @@
   ];
   const byId = (id) => CATALOG.find((c) => c.id === id);
 
+  // ---- Detección de género/época para armar radio similar (modo con key) ----
+  const GENRE_MAP = {
+    pop: ['pop exitos', 'pop clasico', 'pop moderno', 'pop en espanol', 'pop latino exitos'],
+    rock: ['rock clasico', 'rock de los 80', 'rock de los 90', 'rock en espanol', 'pop rock 90'],
+    'rock en espanol': ['rock en espanol exitos', 'rock clasico', 'pop rock'],
+    salsa: ['salsa clasica', 'salsa de los 80', 'salsa romantica'],
+    bachata: ['bachata romantica', 'bachata clasica', 'bachata de los 90'],
+    merengue: ['merengue clasico', 'merengue de los 90'],
+    cumbia: ['cumbia clasica', 'cumbia de los 90', 'cumbia sonidera'],
+    reggaeton: ['reggaeton clasico', 'reggaeton vieja escuela', 'reggaeton romantico'],
+    'hip hop': ['hip hop clasico', 'rap de los 90', 'hip hop vieja escuela'],
+    rap: ['rap clasico', 'rap en espanol', 'rap de los 90'],
+    dance: ['dance music mix', 'dance de los 90', 'eurodance'],
+    lofi: ['lofi hip hop', 'lofi beats', 'lofi relajante'],
+    kpop: ['kpop hits', 'kpop mix', 'kpop baladas'],
+    electronica: ['electronica mix', 'electronica de los 90'],
+    house: ['house music mix', 'classic house', 'deep house'],
+    techno: ['techno mix', 'techno de los 90'],
+    metal: ['heavy metal clasico', 'metal de los 80', 'metal de los 90'],
+    punk: ['punk clasico', 'punk rock', 'punk de los 80'],
+    indie: ['indie rock', 'indie pop', 'indie en espanol'],
+    jazz: ['jazz clasico', 'smooth jazz', 'jazz instrumental'],
+    blues: ['blues clasico', 'blues guitarra'],
+    clasica: ['musica clasica', 'piano clasico', 'sinfonias'],
+    soul: ['soul music classic', 'soul baladas', 'motown classic'],
+    funk: ['funk clasico', 'funk soul'],
+    disco: ['disco clasico', 'disco de los 80'],
+    country: ['country clasico', 'country de los 90'],
+    tango: ['tango clasico', 'tango instrumental'],
+    flamenco: ['flamenco clasico', 'flamenco guitarra'],
+    reggae: ['reggae clasico', 'reggae roots', 'reggae en espanol'],
+    ska: ['ska clasico', 'ska de los 90'],
+    grunge: ['grunge de los 90', 'grunge clasico'],
+    balada: ['baladas clasicas', 'baladas romanticas', 'baladas de los 80'],
+    romantica: ['romanticas clasicas', 'baladas romanticas', 'romanticas de los 90'],
+    cristiana: ['musica cristiana', 'adoracion', 'alabanzas'],
+    infantil: ['canciones infantiles', 'musica para ninos'],
+  };
+  const DECADE_PAIRS = [['80', 'ochenta'], ['90', 'noventa'], ['70', 'setenta'], ['2000', 'dos mil'], ['60', 'sesenta']];
+  const escapeRe = (s) => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+
+  function buildRelatedSeeds(raw) {
+    const q = normPlain(raw);
+    const seeds = new Set();
+    seeds.add(q); seeds.add(q + ' lo mas sonado'); seeds.add(q + ' exitos'); seeds.add(q + ' clasicos');
+    seeds.add('canciones como ' + q); seeds.add(q + ' mix');
+    let genre = null;
+    for (const g of Object.keys(GENRE_MAP)) { if (new RegExp('\\b' + escapeRe(g) + '(s|es)?\\b').test(q)) { genre = g; break; } }
+    const decades = [];
+    for (const [num, word] of DECADE_PAIRS) { if (new RegExp('\\b' + num + '\\b|\\b' + word + '\\b').test(q)) decades.push(num); }
+    if (genre && GENRE_MAP[genre]) { GENRE_MAP[genre].forEach((s) => seeds.add(s)); for (const d of decades) { seeds.add(`${genre} de los ${d}`); seeds.add(`${genre} ${d}s exitos`); } }
+    else { for (const d of decades) { seeds.add(`${q} de los ${d}`); seeds.add(`${q} ${d}s hits`); } }
+    seeds.add(q + ' pop'); seeds.add('pop exitos similares a ' + q);
+    const arr = Array.from(seeds);
+    return [q, ...shuffle(arr.filter((s) => s !== q))].slice(0, 14);
+  }
+
   // ---------- estado ----------
   let player = null, ready = false;
-  let queueIds = [];
+  let ytKey = localStorage.getItem('oneweb_ytkey') || '';
+  let radioMode = 'catalog'; // 'catalog' (playlists) | 'song' (búsqueda por nombre con key)
   let autoDjOn = false, lastPlayedId = null, anchorTags = [], cycle = [], cycleIdx = 0;
-  let repeatMode = 0, shuffleOn = false, skipCount = 0, loadToken = 0;
-  let beatBpm = 120, beatOff = 0;
+  let radioIds = [], songSeeds = [], songSeedCursor = 1;
+  let repeatMode = 0, shuffleOn = false, skipCount = 0, loadToken = 0, beatBpm = 120, beatOff = 0;
 
-  // ---------- YouTube IFrame (audio only) ----------
+  // ---------- YouTube IFrame ----------
   window.onYouTubeIframeAPIReady = () => {
     player = new YT.Player('yt-mount', {
       height: '1', width: '1',
@@ -62,7 +125,7 @@
       events: {
         onReady: () => { ready = true; statusText.textContent = 'Toca para iniciar la radio'; },
         onStateChange: onState,
-        onError: () => { if (autoDjOn) { showToast('Lista no disponible, siguiendo…'); loadNextSeed(); } },
+        onError: () => { if (autoDjOn) { showToast('No disponible, siguiendo…'); if (radioMode === 'song') songRadioNext(); else loadNextSeed(); } },
       },
     });
   };
@@ -71,7 +134,17 @@
     const t = document.createElement('script'); t.src = 'https://www.youtube.com/iframe_api'; t.onerror = () => statusText.textContent = 'No se pudo cargar YouTube (revisa tu conexión)'; document.head.appendChild(t);
   })();
 
-  // ---------- radio infinita: ciclo SIN repetir playlists, variando por estilo ----------
+  // ---------- API de búsqueda (modo con key) ----------
+  async function apiSearch(q, max) {
+    if (!ytKey) return [];
+    const u = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=' + max + '&q=' + encodeURIComponent(q) + '&key=' + ytKey;
+    const r = await fetch(u);
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error((j.error && j.error.message) || ('HTTP ' + r.status)); }
+    const j = await r.json();
+    return (j.items || []).map((it) => it.id && it.id.videoId).filter(Boolean);
+  }
+
+  // ---------- radio por playlists (sin key) ----------
   function buildCycle(startId) {
     const order = []; const visited = new Set();
     let cur = startId || randomFrom(CATALOG).id;
@@ -82,7 +155,6 @@
       const bt = (byId(cur) || {}).tags || [];
       let best = [], bestS = -1;
       for (const c of cands) { const s = c.tags.filter((t) => bt.includes(t)).length; if (s > bestS) { bestS = s; best = [c]; } else if (s === bestS) best.push(c); }
-      // si no hay solapamiento de estilo, elige al azar para máxima variedad
       cur = randomFrom(bestS > 0 ? best : cands).id;
     }
     cycle = order; cycleIdx = 0;
@@ -92,32 +164,58 @@
     if (!cycle.length || cycleIdx >= cycle.length) buildCycle(cycleIdx >= cycle.length ? null : lastPlayedId);
     const id = cycle[cycleIdx++]; lastPlayedId = id;
     const c = byId(id); anchorTags = c ? c.tags : [];
-    statusText.textContent = '🤖 ' + (c ? c.name : 'Radio') + '  ·  ' + (cycleIdx) + '/' + cycle.length;
+    statusText.textContent = '🤖 ' + (c ? c.name : 'Radio') + '  ·  ' + cycleIdx + '/' + cycle.length;
     player.loadPlaylist({ list: id, listType: 'playlist' });
     rebuildQueue();
   }
-  // reproduce una playlist y luego sigue variando por su estilo (infinito, sin repetir)
   function playPlaylist(id) {
-    autoDjOn = true; autoDjBtn.classList.add('on'); hideOverlay();
+    radioMode = 'catalog'; autoDjOn = true; autoDjBtn.classList.add('on'); hideOverlay();
     progressContainer.classList.add('locked');
     buildCycle(id); loadNextSeed();
-    const c = byId(id); showToast('▶ ' + (c ? c.name : 'Playlist') + '  ·  Auto-DJ activado');
+    const c = byId(id); showToast('▶ ' + (c ? c.name : 'Playlist') + '  ·  Auto-DJ');
   }
   function startAutoDj() {
-    autoDjOn = true; autoDjBtn.classList.add('on'); hideOverlay();
+    radioMode = 'catalog'; autoDjOn = true; autoDjBtn.classList.add('on'); hideOverlay();
     progressContainer.classList.add('locked');
     buildCycle(null); loadNextSeed();
     showToast('🤖 Radio infinita · pop, rock, 80-90, latin…');
   }
   function stopAutoDj() { autoDjOn = false; autoDjBtn.classList.remove('on'); progressContainer.classList.remove('locked'); showToast('🤖 Radio pausada (barra habilitada)'); }
 
+  // ---------- radio por canción (con key) ----------
+  async function startSongRadio(q) {
+    radioMode = 'song'; autoDjOn = true; autoDjBtn.classList.add('on'); hideOverlay();
+    progressContainer.classList.add('locked');
+    statusText.textContent = '🔎 ' + q;
+    try {
+      const ids = await apiSearch(q, 1);
+      if (!ids.length) { showToast('Sin resultados para "' + q + '"'); return; }
+      const songId = ids[0];
+      songSeeds = buildRelatedSeeds(q); songSeedCursor = 1;
+      const rel = await fetchRelatedBatch();
+      radioIds = [songId, ...rel];
+      statusText.textContent = '🎵 ' + q;
+      player.loadPlaylist({ list: radioIds, listType: 'playlist' });
+      rebuildQueue(); showToast('▶ ' + q + '  ·  radio similar');
+    } catch (e) { showToast('Error: ' + (e.message || e) + '  (revisa API key en ⚙)'); }
+  }
+  async function fetchRelatedBatch() {
+    const term = songSeeds[songSeedCursor % songSeeds.length]; songSeedCursor++;
+    try { const ids = await apiSearch(term, 12); return shuffle(ids); } catch (e) { return []; }
+  }
+  async function songRadioNext() {
+    for (let k = 0; k < 5; k++) { const ids = await fetchRelatedBatch(); if (ids.length) { radioIds = ids; player.loadPlaylist({ list: radioIds, listType: 'playlist' }); rebuildQueue(); return; } }
+    showToast('Sin más resultados (¿cuota de API?)');
+  }
+
+  // ---------- cola / títulos ----------
   function rebuildQueue() {
     const my = ++loadToken; let tries = 0;
     const tick = () => {
       if (my !== loadToken) return;
       let ids = []; try { ids = player.getPlaylist() || []; } catch (e) {}
       if (!ids.length && tries++ < 8) { setTimeout(tick, 400); return; }
-      queueIds = ids; renderQueue(ids); updateNow();
+      renderQueue(ids); updateNow();
     };
     setTimeout(tick, 600);
   }
@@ -145,13 +243,10 @@
   function updateNow() { let d; try { d = player.getVideoData(); } catch (e) {} if (d && d.video_id) { trackTitle.textContent = d.title || 'Reproduciendo…'; setBeatFor(d.video_id); } }
 
   // ---------- onda "rítmica" (simulada por canción) ----------
-  // Nota: YouTube reproduce el audio en un iframe de otro origen, así que el navegador
-  // NO puede leer la señal real para analizar el beat. Usamos un ritmo generado por
-  // canción (bpm propio de cada track) para que la onda "sienta" el compás.
   const WAVE_N = 48; let waveLines = [], waveOn = false, waveRaf = 0;
   function setBeatFor(videoId) {
     let h = 0; for (let i = 0; i < videoId.length; i++) h = (h * 31 + videoId.charCodeAt(i)) >>> 0;
-    beatBpm = 92 + (h % 60); beatOff = (h % 100) / 100; // 92-152 bpm, fase distinta por canción
+    beatBpm = 92 + (h % 60); beatOff = (h % 100) / 100;
   }
   function buildWave() {
     let s = ''; for (let i = 0; i < WAVE_N; i++) { const x = ((i + 0.5) * 400 / WAVE_N).toFixed(1); s += `<line x1="${x}" y1="50" x2="${x}" y2="50" data-x="${x}"></line>`; }
@@ -162,10 +257,10 @@
     for (let i = 0; i < waveLines.length; i++) {
       let amp;
       if (waveOn) {
-        const beatPhase = ((t * beatBpm / 60) + beatOff * i * 0.02) % 1; // compás por barra
-        const kick = Math.pow(1 - beatPhase, 4);                        // golpe de bombo
-        const sub = Math.sin(t * 2.1 + i * 0.4) * 0.5 + 0.5;            // respiración lenta
-        const spark = Math.abs(Math.sin(t * 9 + i * 0.9)) * 0.5;        // brillo
+        const beatPhase = ((t * beatBpm / 60) + beatOff * i * 0.02) % 1;
+        const kick = Math.pow(1 - beatPhase, 4);
+        const sub = Math.sin(t * 2.1 + i * 0.4) * 0.5 + 0.5;
+        const spark = Math.abs(Math.sin(t * 9 + i * 0.9)) * 0.5;
         const level = 0.18 + 0.32 * sub + 0.30 * spark + 0.55 * kick * (0.6 + 0.4 * Math.sin(i * 0.8));
         amp = 5 + 36 * Math.min(1, level);
       } else amp = 2;
@@ -192,7 +287,10 @@
   }
   function onEnded() {
     if (repeatMode === 2) { try { player.seekTo(0); player.playVideo(); } catch (e) {} return; }
-    if (autoDjOn) { loadNextSeed(); return; } // nunca para: sigue con el siguiente estilo
+    if (autoDjOn) {
+      if (radioMode === 'song') { songRadioNext(); return; }
+      loadNextSeed(); return;
+    }
     if (repeatMode === 1) { let pl = [], idx = -1; try { pl = player.getPlaylist() || []; idx = player.getPlaylistIndex(); } catch (e) {} if (idx >= pl.length - 1) try { player.playVideoAt(0); } catch (e) {} }
   }
 
@@ -202,7 +300,7 @@
   prevBtn.addEventListener('click', () => { try { player.previousVideo(); } catch (e) {} });
   autoDjBtn.addEventListener('click', () => { if (autoDjOn) stopAutoDj(); else startAutoDj(); });
   shuffleBtn.addEventListener('click', () => { shuffleOn = !shuffleOn; shuffleBtn.classList.toggle('on', shuffleOn); showToast(shuffleOn ? '🔀 Aleatorio: activado' : '🔀 Aleatorio: desactivado'); });
-  repeatBtn.addEventListener('click', () => { repeatMode = (repeatMode + 1) % 3; repeatBtn.classList.toggle('on', repeatMode !== 0); repeatBtn.title = repeatMode === 2 ? 'Repetir esta canción' : repeatMode === 1 ? 'Repetir la lista' : 'Repetir: desactivado'; });
+  repeatBtn.addEventListener('click', () => { repeatMode = (repeatMode + 1) % 3; repeatBtn.classList.toggle('on', true); repeatBtn.title = repeatMode === 2 ? 'Repetir esta canción' : repeatMode === 1 ? 'Repetir la lista' : 'Repetir: desactivado'; if (repeatMode === 0) repeatBtn.classList.remove('on'); });
   likeBtn.addEventListener('click', () => likeBtn.classList.toggle('active'));
 
   function setProgress(p) { progressBarFill.style.width = (p * 100).toFixed(1) + '%'; }
@@ -224,7 +322,7 @@
     if (durTimeEl) durTimeEl.textContent = fmt(d);
   }, 500);
 
-  // ---------- buscador (playlists) ----------
+  // ---------- buscador ----------
   function extractPlaylistId(raw) {
     const s = (raw || '').trim();
     if (!s) return null;
@@ -240,27 +338,32 @@
     if (!raw) return;
     if (!player || !ready) { showToast('Espera a que YouTube cargue…'); return; }
     const pid = extractPlaylistId(raw);
-    if (pid) { searchResults.classList.remove('show'); playPlaylist(pid); return; }
-    const q = raw.trim();
-    const hits = matchCatalog(q);
-    if (!hits.length) {
-      searchResults.innerHTML = '<div class="search-item" style="cursor:default;color:#999">Sin playlist para “' + esc(q) + '”. Prueba: pop, rock, 80s, 90s, latin, lofi — o pega un link de playlist de YouTube.</div>';
+    if (pid) { radioMode = 'catalog'; searchResults.classList.remove('show'); playPlaylist(pid); return; }
+    if (ytKey) { searchResults.classList.remove('show'); startSongRadio(raw.trim()); return; }
+    const hits = matchCatalog(raw.trim());
+    if (hits.length) {
+      searchResults.innerHTML = '';
+      hits.forEach((c) => {
+        const li = document.createElement('div'); li.className = 'search-item';
+        li.innerHTML = `<span class="si-idx">▶</span><span style="min-width:0"><span class="si-title">${esc(c.name)}</span> <span class="si-artist">${esc(c.tags.slice(0, 4).join(' · '))}</span></span>`;
+        li.addEventListener('click', () => { searchResults.classList.remove('show'); playPlaylist(c.id); });
+        searchResults.appendChild(li);
+      });
       searchResults.classList.add('show'); return;
     }
-    searchResults.innerHTML = '';
-    hits.forEach((c) => {
-      const li = document.createElement('div'); li.className = 'search-item';
-      li.innerHTML = `<span class="si-idx">▶</span><span style="min-width:0"><span class="si-title">${esc(c.name)}</span> <span class="si-artist">${esc(c.tags.slice(0, 4).join(' · '))}</span></span>`;
-      li.addEventListener('click', () => { searchResults.classList.remove('show'); playPlaylist(c.id); });
-      searchResults.appendChild(li);
-    });
+    searchResults.innerHTML = '<div class="search-item" style="cursor:default;color:#999">Para buscar “' + esc(raw.trim()) + '” por nombre, agrega tu API key gratuita (⚙). Sin key: busca un estilo (pop, rock, 80s…) o pega un link de playlist de YouTube.</div>';
     searchResults.classList.add('show');
   }
   searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const v = searchInput.value.trim(); if (v) doSearch(v); } });
   searchInput.addEventListener('blur', () => setTimeout(() => searchResults.classList.remove('show'), 250));
   searchInput.addEventListener('focus', () => { if (searchResults.children.length) searchResults.classList.add('show'); });
 
-  // ---------- overlay de inicio (gesto para autoplay) ----------
+  // ---------- API key modal ----------
+  keyBtn.addEventListener('click', () => { keyInput.value = ytKey; keyModal.classList.remove('hidden'); });
+  keyCancel.addEventListener('click', () => keyModal.classList.add('hidden'));
+  keySave.addEventListener('click', () => { ytKey = keyInput.value.trim(); if (ytKey) localStorage.setItem('oneweb_ytkey', ytKey); else localStorage.removeItem('oneweb_ytkey'); keyModal.classList.add('hidden'); showToast(ytKey ? '✓ API key guardada' : 'API key borrada'); });
+
+  // ---------- overlay de inicio ----------
   function hideOverlay() { if (overlay) overlay.classList.add('hidden'); }
   if (overlay) overlay.addEventListener('click', () => { if (!ready) { showToast('Cargando YouTube…'); return; } startAutoDj(); });
 
