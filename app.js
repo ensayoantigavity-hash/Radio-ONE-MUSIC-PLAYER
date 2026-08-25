@@ -20,11 +20,6 @@
   const volumeFill = $('#volumeFill');
   const toastEl = $('#toast');
   const overlay = $('#startOverlay');
-  const keyBtn = $('#keyBtn');
-  const keyModal = $('#keyModal');
-  const keyInput = $('#keyInput');
-  const keySave = $('#keySave');
-  const keyCancel = $('#keyCancel');
 
   const PLAY_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M8 5v14l11-7z"/></svg>';
   const PAUSE_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
@@ -111,8 +106,7 @@
 
   // ---------- estado ----------
   let player = null, ready = false;
-  let ytKey = localStorage.getItem('oneweb_ytkey') || '';
-  let radioMode = 'catalog'; // 'catalog' (playlists) | 'song' (búsqueda por nombre con key)
+  let radioMode = 'catalog'; // 'catalog' (playlists) | 'song' (búsqueda por nombre vía YouTube)
   let autoDjOn = false, lastPlayedId = null, anchorTags = [], cycle = [], cycleIdx = 0;
   let radioIds = [], songSeeds = [], songSeedCursor = 1;
   let repeatMode = 0, shuffleOn = false, skipCount = 0, loadToken = 0, beatBpm = 120, beatOff = 0;
@@ -134,14 +128,28 @@
     const t = document.createElement('script'); t.src = 'https://www.youtube.com/iframe_api'; t.onerror = () => statusText.textContent = 'No se pudo cargar YouTube (revisa tu conexión)'; document.head.appendChild(t);
   })();
 
-  // ---------- API de búsqueda (modo con key) ----------
-  async function apiSearch(q, max) {
-    if (!ytKey) return [];
-    const u = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=' + max + '&q=' + encodeURIComponent(q) + '&key=' + ytKey;
-    const r = await fetch(u);
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error((j.error && j.error.message) || ('HTTP ' + r.status)); }
-    const j = await r.json();
-    return (j.items || []).map((it) => it.id && it.id.videoId).filter(Boolean);
+  // ---------- Búsqueda web de música vía YouTube (sin API key) ----------
+  // YouTube mató la búsqueda por texto en el IFrame (2020), y la API oficial pide key.
+  // Para no usar key ni servidor propio, leemos los resultados de búsqueda de YouTube
+  // a través de un proxy CORS público y extraemos los videoIds.
+  const PROXIES = [
+    (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+    (u) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u),
+  ];
+  async function fetchText(url) {
+    let lastErr;
+    for (const p of PROXIES) {
+      try { const r = await fetch(p(url)); if (!r.ok) throw new Error('HTTP ' + r.status); const t = await r.text(); if (t && t.length > 500) return t; }
+      catch (e) { lastErr = e; }
+    }
+    throw lastErr || new Error('proxy no disponible');
+  }
+  async function scrapeYouTube(q, max) {
+    const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+    const html = await fetchText(url);
+    const ids = []; const re = /"videoId":"([a-zA-Z0-9_-]{11})"/g; let m;
+    while ((m = re.exec(html)) && ids.length < max + 6) { const id = m[1]; if (!ids.includes(id)) ids.push(id); }
+    return ids.slice(0, max);
   }
 
   // ---------- radio por playlists (sin key) ----------
@@ -186,10 +194,10 @@
   async function startSongRadio(q) {
     radioMode = 'song'; autoDjOn = true; autoDjBtn.classList.add('on'); hideOverlay();
     progressContainer.classList.add('locked');
-    statusText.textContent = '🔎 ' + q;
+    statusText.textContent = '🔎 Buscando: ' + q;
     try {
-      const ids = await apiSearch(q, 1);
-      if (!ids.length) { showToast('Sin resultados para "' + q + '"'); return; }
+      const ids = await scrapeYouTube(q, 1);
+      if (!ids.length) throw new Error('sin resultados');
       const songId = ids[0];
       songSeeds = buildRelatedSeeds(q); songSeedCursor = 1;
       const rel = await fetchRelatedBatch();
@@ -197,11 +205,15 @@
       statusText.textContent = '🎵 ' + q;
       player.loadPlaylist({ list: radioIds, listType: 'playlist' });
       rebuildQueue(); showToast('▶ ' + q + '  ·  radio similar');
-    } catch (e) { showToast('Error: ' + (e.message || e) + '  (revisa API key en ⚙)'); }
+    } catch (e) {
+      const hits = matchCatalog(q);
+      if (hits.length) { playPlaylist(hits[0].id); showToast('⚠ Búsqueda web caída; usando playlist de estilo'); }
+      else showToast('No se pudo buscar (proxy no disponible). Prueba un estilo o pega un link.');
+    }
   }
   async function fetchRelatedBatch() {
     const term = songSeeds[songSeedCursor % songSeeds.length]; songSeedCursor++;
-    try { const ids = await apiSearch(term, 12); return shuffle(ids); } catch (e) { return []; }
+    try { const ids = await scrapeYouTube(term, 12); return shuffle(ids); } catch (e) { return []; }
   }
   async function songRadioNext() {
     for (let k = 0; k < 5; k++) { const ids = await fetchRelatedBatch(); if (ids.length) { radioIds = ids; player.loadPlaylist({ list: radioIds, listType: 'playlist' }); rebuildQueue(); return; } }
@@ -339,29 +351,12 @@
     if (!player || !ready) { showToast('Espera a que YouTube cargue…'); return; }
     const pid = extractPlaylistId(raw);
     if (pid) { radioMode = 'catalog'; searchResults.classList.remove('show'); playPlaylist(pid); return; }
-    if (ytKey) { searchResults.classList.remove('show'); startSongRadio(raw.trim()); return; }
-    const hits = matchCatalog(raw.trim());
-    if (hits.length) {
-      searchResults.innerHTML = '';
-      hits.forEach((c) => {
-        const li = document.createElement('div'); li.className = 'search-item';
-        li.innerHTML = `<span class="si-idx">▶</span><span style="min-width:0"><span class="si-title">${esc(c.name)}</span> <span class="si-artist">${esc(c.tags.slice(0, 4).join(' · '))}</span></span>`;
-        li.addEventListener('click', () => { searchResults.classList.remove('show'); playPlaylist(c.id); });
-        searchResults.appendChild(li);
-      });
-      searchResults.classList.add('show'); return;
-    }
-    searchResults.innerHTML = '<div class="search-item" style="cursor:default;color:#999">Para buscar “' + esc(raw.trim()) + '” por nombre, agrega tu API key gratuita (⚙). Sin key: busca un estilo (pop, rock, 80s…) o pega un link de playlist de YouTube.</div>';
-    searchResults.classList.add('show');
+    searchResults.classList.remove('show');
+    startSongRadio(raw.trim());
   }
   searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const v = searchInput.value.trim(); if (v) doSearch(v); } });
   searchInput.addEventListener('blur', () => setTimeout(() => searchResults.classList.remove('show'), 250));
   searchInput.addEventListener('focus', () => { if (searchResults.children.length) searchResults.classList.add('show'); });
-
-  // ---------- API key modal ----------
-  keyBtn.addEventListener('click', () => { keyInput.value = ytKey; keyModal.classList.remove('hidden'); });
-  keyCancel.addEventListener('click', () => keyModal.classList.add('hidden'));
-  keySave.addEventListener('click', () => { ytKey = keyInput.value.trim(); if (ytKey) localStorage.setItem('oneweb_ytkey', ytKey); else localStorage.removeItem('oneweb_ytkey'); keyModal.classList.add('hidden'); showToast(ytKey ? '✓ API key guardada' : 'API key borrada'); });
 
   // ---------- overlay de inicio ----------
   function hideOverlay() { if (overlay) overlay.classList.add('hidden'); }
