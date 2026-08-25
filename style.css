@@ -11,6 +11,9 @@ body {
   border-radius: 16px; padding: 24px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05);
 }
 
+.brand { text-align: center; font-size: 15px; font-weight: 800; letter-spacing: 0.5px; color: #111; margin-bottom: 16px; }
+.brand span { color: #888; font-weight: 400; margin-left: 4px; }
+
 /* Buscador */
 .search-box { position: relative; margin-bottom: 14px; display: flex; align-items: center; }
 .search-box input {
