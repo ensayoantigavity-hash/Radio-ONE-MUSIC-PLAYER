@@ -137,15 +137,19 @@
   // a través de un proxy CORS público y extraemos los videoIds.
   const PROXIES = [
     (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+    (u) => 'https://thingproxy.freeboard.io/fetch/' + u,
     (u) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u),
   ];
   async function fetchText(url) {
-    let lastErr;
     for (const p of PROXIES) {
-      try { const r = await fetch(p(url)); if (!r.ok) throw new Error('HTTP ' + r.status); const t = await r.text(); if (t && t.length > 500) return t; }
-      catch (e) { lastErr = e; }
+      try {
+        const r = await fetch(p(url), { signal: AbortSignal.timeout(12000) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const t = await r.text();
+        if (t && t.length > 500 && /videoId/.test(t)) return t;
+      } catch (e) { /* intenta el siguiente proxy */ }
     }
-    throw lastErr || new Error('proxy no disponible');
+    throw new Error('proxy no disponible');
   }
   async function scrapeYouTube(q, max) {
     const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
