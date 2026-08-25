@@ -26,6 +26,7 @@
   const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const showToast = (m) => { toastEl.textContent = m; toastEl.classList.add('show'); clearTimeout(showToast._t); showToast._t = setTimeout(() => toastEl.classList.remove('show'), 3200); };
   const normPlain = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+  const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), r = s % 60; return m + ':' + String(r).padStart(2, '0'); };
   const shuffle = (a) => { const r = a.slice(); for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; } return r; };
   const randomFrom = (a) => a[Math.floor(Math.random() * a.length)];
 
@@ -49,7 +50,7 @@
   // ---------- estado ----------
   let player = null, ready = false;
   let queueIds = [];
-  let autoDjOn = false, lastPlayedId = null, anchorTags = [];
+  let autoDjOn = false, lastPlayedId = null, anchorTags = [], cycle = [], cycleIdx = 0;
   let repeatMode = 0, shuffleOn = false, skipCount = 0, loadToken = 0;
   let beatBpm = 120, beatOff = 0;
 
@@ -70,39 +71,45 @@
     const t = document.createElement('script'); t.src = 'https://www.youtube.com/iframe_api'; t.onerror = () => statusText.textContent = 'No se pudo cargar YouTube (revisa tu conexión)'; document.head.appendChild(t);
   })();
 
-  // ---------- radio infinita por estilo ----------
-  function pickNextId() {
-    const pool = CATALOG.filter((c) => c.id !== lastPlayedId);
-    if (!pool.length) return CATALOG[0].id;
-    if (shuffleOn || !anchorTags.length) return randomFrom(pool).id;
-    const scored = pool.map((c) => ({ c, s: c.tags.filter((t) => anchorTags.includes(t)).length }));
-    const max = Math.max(...scored.map((x) => x.s));
-    const top = scored.filter((x) => x.s >= Math.max(1, max)).map((x) => x.c);
-    return randomFrom(top).id;
+  // ---------- radio infinita: ciclo SIN repetir playlists, variando por estilo ----------
+  function buildCycle(startId) {
+    const order = []; const visited = new Set();
+    let cur = startId || randomFrom(CATALOG).id;
+    while (order.length < CATALOG.length) {
+      order.push(cur); visited.add(cur);
+      const cands = CATALOG.filter((c) => !visited.has(c.id));
+      if (!cands.length) break;
+      const bt = (byId(cur) || {}).tags || [];
+      let best = [], bestS = -1;
+      for (const c of cands) { const s = c.tags.filter((t) => bt.includes(t)).length; if (s > bestS) { bestS = s; best = [c]; } else if (s === bestS) best.push(c); }
+      // si no hay solapamiento de estilo, elige al azar para máxima variedad
+      cur = randomFrom(bestS > 0 ? best : cands).id;
+    }
+    cycle = order; cycleIdx = 0;
   }
   function loadNextSeed() {
     if (!autoDjOn) return;
-    const id = pickNextId(); lastPlayedId = id;
+    if (!cycle.length || cycleIdx >= cycle.length) buildCycle(cycleIdx >= cycle.length ? null : lastPlayedId);
+    const id = cycle[cycleIdx++]; lastPlayedId = id;
     const c = byId(id); anchorTags = c ? c.tags : [];
-    statusText.textContent = '🤖 ' + (c ? c.name : 'Radio');
+    statusText.textContent = '🤖 ' + (c ? c.name : 'Radio') + '  ·  ' + (cycleIdx) + '/' + cycle.length;
     player.loadPlaylist({ list: id, listType: 'playlist' });
     rebuildQueue();
   }
-  // reproduce una playlist y luego sigue variando por su estilo (infinito)
+  // reproduce una playlist y luego sigue variando por su estilo (infinito, sin repetir)
   function playPlaylist(id) {
     autoDjOn = true; autoDjBtn.classList.add('on'); hideOverlay();
-    const c = byId(id); anchorTags = c ? c.tags : []; lastPlayedId = id;
-    statusText.textContent = '🤖 ' + (c ? c.name : 'Playlist');
-    player.loadPlaylist({ list: id, listType: 'playlist' });
-    rebuildQueue(); showToast('▶ ' + (c ? c.name : 'Playlist'));
+    progressContainer.classList.add('locked');
+    buildCycle(id); loadNextSeed();
+    const c = byId(id); showToast('▶ ' + (c ? c.name : 'Playlist') + '  ·  Auto-DJ activado');
   }
   function startAutoDj() {
     autoDjOn = true; autoDjBtn.classList.add('on'); hideOverlay();
-    anchorTags = []; lastPlayedId = null;
+    progressContainer.classList.add('locked');
+    buildCycle(null); loadNextSeed();
     showToast('🤖 Radio infinita · pop, rock, 80-90, latin…');
-    loadNextSeed();
   }
-  function stopAutoDj() { autoDjOn = false; autoDjBtn.classList.remove('on'); showToast('🤖 Radio pausada'); }
+  function stopAutoDj() { autoDjOn = false; autoDjBtn.classList.remove('on'); progressContainer.classList.remove('locked'); showToast('🤖 Radio pausada (barra habilitada)'); }
 
   function rebuildQueue() {
     const my = ++loadToken; let tries = 0;
@@ -200,6 +207,7 @@
 
   function setProgress(p) { progressBarFill.style.width = (p * 100).toFixed(1) + '%'; }
   progressContainer.addEventListener('click', (e) => {
+    if (autoDjOn) { showToast('🤖 Auto-DJ activo: reproducción continua (sin adelantar)'); return; }
     const r = progressContainer.getBoundingClientRect(); const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
     setProgress(p); if (player && player.getDuration) { const d = player.getDuration(); if (d > 0) player.seekTo(p * d, true); }
   });
@@ -207,7 +215,14 @@
     const r = volumeSlider.getBoundingClientRect(); const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
     volumeFill.style.width = (p * 100).toFixed(0) + '%'; if (player && player.setVolume) player.setVolume(Math.round(p * 100));
   });
-  setInterval(() => { if (!player || !player.getDuration) return; const d = player.getDuration(), c = player.getCurrentTime ? player.getCurrentTime() : 0; if (d > 0) setProgress(c / d); }, 500);
+  const curTimeEl = $('#curTime'), durTimeEl = $('#durTime');
+  setInterval(() => {
+    if (!player || !player.getDuration) return;
+    const d = player.getDuration(), c = player.getCurrentTime ? player.getCurrentTime() : 0;
+    if (d > 0) setProgress(c / d);
+    if (curTimeEl) curTimeEl.textContent = fmt(c);
+    if (durTimeEl) durTimeEl.textContent = fmt(d);
+  }, 500);
 
   // ---------- buscador (playlists) ----------
   function extractPlaylistId(raw) {
