@@ -91,8 +91,11 @@
   function buildRelatedSeeds(raw) {
     const q = normPlain(raw);
     const seeds = new Set();
-    seeds.add(q); seeds.add(q + ' lo mas sonado'); seeds.add(q + ' exitos'); seeds.add(q + ' clasicos');
-    seeds.add('canciones como ' + q); seeds.add(q + ' mix');
+    seeds.add(q);
+    seeds.add(q + ' lo mas sonado'); seeds.add(q + ' exitos'); seeds.add(q + ' clasicos'); seeds.add(q + ' lo mejor');
+    seeds.add(q + ' en vivo'); seeds.add(q + ' acoustic'); seeds.add(q + ' remix');
+    seeds.add('canciones como ' + q); seeds.add('playlist ' + q); seeds.add('lo mejor de ' + q);
+    seeds.add('artistas como ' + q); seeds.add('bands like ' + q); seeds.add(q + ' mix');
     let genre = null;
     for (const g of Object.keys(GENRE_MAP)) { if (new RegExp('\\b' + escapeRe(g) + '(s|es)?\\b').test(q)) { genre = g; break; } }
     const decades = [];
@@ -101,7 +104,7 @@
     else { for (const d of decades) { seeds.add(`${q} de los ${d}`); seeds.add(`${q} ${d}s hits`); } }
     seeds.add(q + ' pop'); seeds.add('pop exitos similares a ' + q);
     const arr = Array.from(seeds);
-    return [q, ...shuffle(arr.filter((s) => s !== q))].slice(0, 14);
+    return [q, ...shuffle(arr.filter((s) => s !== q))].slice(0, 18);
   }
 
   // ---------- estado ----------
@@ -196,15 +199,15 @@
     progressContainer.classList.add('locked');
     statusText.textContent = '🔎 Buscando: ' + q;
     try {
-      const ids = await scrapeYouTube(q, 1);
+      const ids = await scrapeYouTube(q, 12);
       if (!ids.length) throw new Error('sin resultados');
-      const songId = ids[0];
       songSeeds = buildRelatedSeeds(q); songSeedCursor = 1;
-      const rel = await fetchRelatedBatch();
-      radioIds = [songId, ...rel];
+      radioIds = ids; // base = los mejores resultados de la búsqueda (canción/artista/género)
       statusText.textContent = '🎵 ' + q;
       player.loadPlaylist({ list: radioIds, listType: 'playlist' });
-      rebuildQueue(); showToast('▶ ' + q + '  ·  radio similar');
+      rebuildQueue();
+      searchResults.classList.add('show'); // muestra lo encontrado para poder elegir
+      showToast('▶ ' + q + '  ·  radio infinita');
     } catch (e) {
       const hits = matchCatalog(q);
       if (hits.length) { playPlaylist(hits[0].id); showToast('⚠ Búsqueda web caída; usando playlist de estilo'); }
@@ -355,7 +358,7 @@
     startSongRadio(raw.trim());
   }
   searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const v = searchInput.value.trim(); if (v) doSearch(v); } });
-  searchInput.addEventListener('blur', () => setTimeout(() => searchResults.classList.remove('show'), 250));
+  searchInput.addEventListener('blur', () => setTimeout(() => searchResults.classList.remove('show'), 500));
   searchInput.addEventListener('focus', () => { if (searchResults.children.length) searchResults.classList.add('show'); });
 
   // ---------- overlay de inicio ----------
